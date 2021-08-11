@@ -1,0 +1,192 @@
+library ("BBmisc")
+
+library("dplyr")
+
+library("jtools")
+
+library("forecast")
+
+library ("moments")
+
+library("broom.mixed")
+
+library("summarytools")
+
+library("PerformanceAnalytics")
+
+###### CMGST ANALYSIS WITH RESPECT TO GREENLAND & ANTARCTICA ICE SHEETS #####
+
+setwd("C:\Users\Israt\Desktop")
+
+##### INPUTTING DATA INTO R & DATA PREPROCESSING #####
+
+Global_temp <- read.csv("global_temp_final.csv", sep = ",", header = TRUE)
+
+greenland_mass <- read.csv("greenland_mass_final.csv", sep = ",", header = TRUE)
+
+antarctica_mass <- read.csv ("antarctica_mass_final.csv", sep = ",", header = TRUE)
+
+#Data Pre-processing for CMGST Dataset
+
+Global_temp_columns <- subset.data.frame(Global_temp, 
+                                        select = c(Year, No_Smoothing))
+
+colnames (Global_temp_columns) <- c("Year", "CMGST")
+
+#Data Pre-processing for Greenland Dataset
+
+greenland_mass_columns <- subset.data.frame(greenland_mass, select = c(Year.decimal,Greenland_mass))
+
+colnames (greenland_mass_columns) <- c("Year", "Greenland_Mass_Loss")
+
+greenland_mass_columns$Year <- as.integer(greenland_mass_columns$Year) 
+
+greenland_mass_year_mean <-greenland_mass_columns %>% group_by(Year) %>% summarise_each(funs(mean))
+
+#Data Pre-processing for Antarctica Dataset
+
+antarctica_mass_columns <- subset.data.frame(antarctica_mass, select = c(Year.decimal,Antarctica_mass))
+
+colnames (antarctica_mass_columns) <- c("Year", "Antarctica_Mass_Loss")
+
+antarctica_mass_columns$Year <- as.integer(antarctica_mass_columns$Year) 
+
+antarctica_mass_year_mean <-antarctica_mass_columns %>% group_by(Year) %>% summarise_each(funs(mean))
+
+#----------------------------------------------------------
+
+Global_temp_2003_2020 <- filter(Global_temp_columns, (Year>= 2003 & Year <= 2020))
+
+greenland_mass_year_mean_03_20 <- filter(greenland_mass_year_mean, (Year>= 2003 & Year <= 2020))
+
+antarctica_mass_year_mean_03_20 <- filter(antarctica_mass_year_mean, (Year>= 2003 & Year <= 2020))
+
+Global_temp_greenland_03_20_mean <- inner_join(Global_temp_2003_2020, 
+                                           greenland_mass_year_mean_03_20, 
+                                           by = "Year")
+
+Global_temp_greenland_antarctica_03_20 <- inner_join(Global_temp_greenland_03_20_mean, 
+                                                      antarctica_mass_year_mean_03_20,
+                                                      by = "Year")
+
+write.csv(Global_temp_greenland_antarctica_03_20,
+          "CMGST_greenland_antarctica_03_20.csv")
+
+##### 1- Descriptive Statistics #####
+
+Data_03_20 = Global_temp_greenland_antarctica_03_20
+
+colnames(Data_03_20)=c("Year", "CMGST", "Greenland_Mass_Loss",
+                             "Antarctica_Mass_Loss")
+
+descr = descr(Data_03_20[,-1],
+              stats = "all", transpose = F )
+descr
+
+Data_03_20 <- Data_03_20 %>% rowwise() %>%
+  mutate(Sum_Ice_Mass = sum(c_across(Greenland_Mass_Loss:Antarctica_Mass_Loss)))
+
+#-------------------------------------------------------
+
+attach(Data_03_20)
+
+hist(CMGST, col ="red", main ="CMGST") 
+
+boxplot(CMGST, col = "red", main ="CMGST")
+
+hist(Greenland_Mass_Loss, col ="green", main ="Greenland_Mass_Loss") 
+
+boxplot(Greenland_Mass_Loss, col = "green", main ="Greenland_Mass_Loss")
+
+hist(Antarctica_Mass_Loss, main = "Antarctica_Mass_Loss", col =5) 
+
+boxplot(Antarctica_Mass_Loss, main = "Antarctica_Mass_Loss", col = 5)
+
+##### 2- correlation #####
+
+chart.Correlation(Data_03_20[,-1], histogram=T, pch="+")
+
+#-------------------------------------------------------
+
+##### 3- Regression #####
+
+myData <- Data_03_20 %>% mutate(Year = factor(Year))
+
+myNorm <- normalize(myData, method="range", range = c(0,1), margin = 1)
+
+myNorm
+
+## A- simple regression 
+
+model1 = lm (myNorm$Greenland_Mass_Loss~myNorm$CMGST)
+
+summ(model1,confint = TRUE, digits = 3)
+
+# check normality (Shapiro-Wilk test)
+
+qqnorm(model1$residuals) 
+
+qqline(model1$residuals,col=2)
+
+shapiro.test(model1$residuals)
+
+#------------------------------
+model2 = lm (myNorm$Antarctica_Mass_Loss ~ myNorm$CMGST)
+
+summ(model2)
+
+# check normality (Shapiro-Wilk test)
+
+qqnorm(model2$residuals); 
+
+qqline(model2$residuals,col=2)
+
+shapiro.test(model2$residuals)
+
+
+
+#----- The final model
+
+## We will suggest a new model based on a new variable:
+
+#   New variable = Sum of the two independent variables
+
+model3 = lm (myNorm$Sum_Ice_Mass ~ myNorm$CMGST)
+
+summ(model3)
+
+# check normality (Shapiro-Wilk test)
+
+qqnorm(model3$residuals); qqline(model3$residuals,col=2)
+
+shapiro.test(model3$residuals)
+
+##### 4- Time series forecasting #####
+
+# Greenland
+
+ts.fit11= auto.arima(ts(Data_03_20$Greenland_Mass_Loss, 2003, 2020), ic="bic")
+
+ts.fit1
+
+# check the residuals
+checkresiduals(ts.fit1,lag=10)
+
+# forecast 1 year (from 2020 to 2021)
+forecast(ts.fit1,h=1)
+
+plot(forecast(ts.fit1,h=1))
+
+#Antarctica
+
+ts.fit2= auto.arima(ts(Data_03_20$Antarctica_Mass_Loss, 2003, 2020), ic="bic")
+
+ts.fit2
+
+# check the residuals
+checkresiduals(ts.fit2,lag=10)
+
+# forecast 1 years (from 2020 to 2021)
+forecast(ts.fit2,h=1)
+
+plot(forecast(ts.fit2,h=1))
